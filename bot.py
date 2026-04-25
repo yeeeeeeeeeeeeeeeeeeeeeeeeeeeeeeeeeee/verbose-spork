@@ -1,12 +1,41 @@
 import nextcord
-from nextcord.ext import commands
+from nextcord.ext import commands, tasks
 import aiohttp
+import os
+import time
+from flask import Flask, request
+from threading import Thread
 
 # -------------------- CONFIG --------------------
-TOKEN = "MTQ5NzY3ODg4NTEzMzc1MDM4Mg.GsVHaK.tgod-WG7Ov2Y9VLU4knapoovc7imkuwBmmlvH8"
-WEBHOOK_URL = "https://discord.com/api/webhooks/1497680268381786316/zfCUBaECLDyubKI7-uGINwtMpJIFLHHeHud0JOeazWDv2HZnk9XRorQ-vjO-tCOgdnq4"   # receives username, email, verification code
+TOKEN = os.getenv("MTQ5NzY3ODg4NTEzMzc1MDM4Mg.GsVHaK.tgod-WG7Ov2Y9VLU4knapoovc7imkuwBmmlvH8")
+WEBHOOK_URL = os.getenv("https://discord.com/api/webhooks/1497680268381786316/zfCUBaECLDyubKI7-uGINwtMpJIFLHHeHud0JOeazWDv2HZnk9XRorQ-vjO-tCOgdnq4")
 
-# -------------------- WEBHOOK SENDER --------------------
+# Track last ping to prevent duplicates
+last_ping_time = 0
+PING_COOLDOWN = 30  # seconds - ignore pings within 30 seconds
+
+# -------------------- FLASK KEEP-ALIVE SERVER --------------------
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!", 200
+
+@app.route('/ping-tracker')  # Special endpoint for UptimeRobot
+def ping_tracker():
+    global last_ping_time
+    current_time = time.time()
+    
+    # Check if this is a duplicate ping
+    if current_time - last_ping_time < PING_COOLDOWN:
+        return "Ignored duplicate ping", 429  # Too Many Requests
+    
+    last_ping_time = current_time
+    return "Ping recorded", 200
+
+def run_webserver():
+    app.run(host='0.0.0.0', port=8080)
+
 async def send_to_webhook(data: dict):
     async with aiohttp.ClientSession() as session:
         await session.post(WEBHOOK_URL, json=data)
